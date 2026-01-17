@@ -15,10 +15,10 @@ on:
         default: 'full'
         type: choice
         options:
-          - full              # 完整分析（股票+大盘+财报日历）
-          - market-only       # 仅大盘复盘
-          - stocks-only       # 仅股票分析
-          - earnings-only     # 仅财报日历
+          - full
+          - market-only
+          - stocks-only
+          - earnings-only
 
 jobs:
   analyze:
@@ -39,50 +39,25 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          # 安装 OpenAI 库（用于备用 API）
           pip install openai
       
       - name: 创建必要目录
-        run: |
-          mkdir -p data logs reports
+        run: mkdir -p data logs reports
       
       - name: 执行股票分析
         env:
-          # ============================================
-          # Gemini AI 配置
-          # ============================================
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-2.0-flash' }}
           GEMINI_MODEL_FALLBACK: ${{ secrets.GEMINI_MODEL_FALLBACK || 'gemini-1.5-flash' }}
-          
-          # ⭐ 关键优化：增加请求延时，避免 429
           GEMINI_REQUEST_DELAY: '6.0'
           GEMINI_MAX_RETRIES: '5'
           GEMINI_RETRY_DELAY: '10'
-          
-          # ============================================
-          # OpenAI 兼容 API（备用，支持任意兼容服务）
-          # 用户可配置：OpenAI / DeepSeek / Groq 等
-          # ============================================
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
-          # ⭐ 用户自定义模型，支持任意 OpenAI 兼容模型
           OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || 'gpt-4o-mini' }}
-          
-          # ============================================
-          # 数据源
-          # ============================================
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-          
-          # ============================================
-          # 搜索服务（财报日历+新闻）
-          # ============================================
           TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
           SERPAPI_API_KEYS: ${{ secrets.SERPAPI_API_KEYS }}
-          
-          # ============================================
-          # 通知渠道
-          # ============================================
           WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -94,71 +69,33 @@ jobs:
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
           FEISHU_FOLDER_TOKEN: ${{ secrets.FEISHU_FOLDER_TOKEN }}
-          
-          # ============================================
-          # 股票列表配置
-          # ============================================
-          # A股自选股
           STOCK_LIST: ${{ secrets.STOCK_LIST || '600519' }}
-          
-          # ⭐ 新增：美股 AI/机器人监控列表
           US_STOCK_LIST: ${{ secrets.US_STOCK_LIST || 'NVDA,TSLA,AMD,MSFT,GOOG,META,ISRG,SYM,TER,QCOM' }}
-          
-          # ============================================
-          # 财报日历配置
-          # ============================================
           ENABLE_EARNINGS_CALENDAR: 'true'
           EARNINGS_LOOKAHEAD_DAYS: '7'
-          
-          # ============================================
-          # 其他配置
-          # ============================================
           LOG_LEVEL: INFO
           DATA_DAYS: '30'
           MAX_CONCURRENT: '1'
-          
         run: |
           MODE="${{ github.event.inputs.mode || 'full' }}"
           
           echo "=========================================="
-          echo "🚀 股票分析系统启动"
+          echo "股票分析系统启动"
           echo "=========================================="
-          echo "📅 时间: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')"
-          echo "📊 运行模式: $MODE"
-          echo "📈 A股自选: $STOCK_LIST"
-          echo "🇺🇸 美股监控: $US_STOCK_LIST"
-          echo "⏱️ 请求延时: ${GEMINI_REQUEST_DELAY}s"
-          echo "🔄 并发数: ${MAX_CONCURRENT}"
-          echo "📅 财报提醒: ${ENABLE_EARNINGS_CALENDAR} (T+${EARNINGS_LOOKAHEAD_DAYS})"
+          echo "时间: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')"
+          echo "运行模式: $MODE"
+          echo "A股自选: $STOCK_LIST"
+          echo "美股监控: $US_STOCK_LIST"
           echo "=========================================="
           
-          # 启动延时，避免调度拥堵
-          echo "⏳ 等待 30 秒后开始..."
           sleep 30
           
-          # 根据模式执行
           if [ "$MODE" = "market-only" ]; then
             python main.py --market-review
           elif [ "$MODE" = "stocks-only" ]; then
             python main.py --no-market-review
           elif [ "$MODE" = "earnings-only" ]; then
-            python -c "
-from earnings_calendar import EarningsCalendar
-import os
-
-cal = EarningsCalendar()
-cn_stocks = os.getenv('STOCK_LIST', '').split(',')
-us_stocks = os.getenv('US_STOCK_LIST', '').split(',')
-
-events = cal.get_upcoming_earnings(cn_stocks, us_stocks)
-msg = cal.format_notification(events)
-
-if msg:
-    print(msg)
-    # TODO: 调用通知模块
-else:
-    print('未找到近期财报')
-"
+            python -c "from earnings_calendar import EarningsCalendar; import os; cal = EarningsCalendar(); cn = os.getenv('STOCK_LIST', '').split(','); us = os.getenv('US_STOCK_LIST', '').split(','); events = cal.get_upcoming_earnings(cn, us); print(cal.format_notification(events)) if events else print('No earnings found')"
           else
             python main.py
           fi
@@ -166,25 +103,28 @@ else:
       - name: 检查财报日历
         if: env.ENABLE_EARNINGS_CALENDAR == 'true' && github.event.inputs.mode != 'earnings-only'
         continue-on-error: true
+        env:
+          STOCK_LIST: ${{ secrets.STOCK_LIST || '600519' }}
+          US_STOCK_LIST: ${{ secrets.US_STOCK_LIST || 'NVDA,TSLA,AMD,MSFT,GOOG,META,ISRG,SYM,TER,QCOM' }}
+          TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
         run: |
-          echo "📅 检查财报日历..."
+          echo "检查财报日历..."
           python -c "
-try:
-    from earnings_calendar import EarningsCalendar
-    import os
-    
-    cal = EarningsCalendar()
-    cn = os.getenv('STOCK_LIST', '').split(',')
-    us = os.getenv('US_STOCK_LIST', '').split(',')
-    
-    events = cal.get_upcoming_earnings(cn, us)
-    if events:
-        print(cal.format_notification(events))
-    else:
-        print('✅ 未来7天内无财报发布')
-except Exception as e:
-    print(f'⚠️ 财报日历检查失败: {e}')
-"
+          try:
+              from earnings_calendar import EarningsCalendar
+              import os
+              cal = EarningsCalendar()
+              cn = os.getenv('STOCK_LIST', '').split(',')
+              us = os.getenv('US_STOCK_LIST', '').split(',')
+              events = cal.get_upcoming_earnings(cn, us)
+              if events:
+                  print(cal.format_notification(events))
+              else:
+                  print('No upcoming earnings in the next 7 days')
+          except Exception as e:
+              print(f'Earnings calendar check failed: {e}')
+          "
       
       - name: 上传分析报告
         uses: actions/upload-artifact@v4
@@ -200,14 +140,13 @@ except Exception as e:
         if: always()
         run: |
           echo "=========================================="
-          echo "✅ 分析完成"
+          echo "分析完成"
           echo "=========================================="
           if [ -d "reports" ]; then
-            echo "📄 生成的报告:"
+            echo "生成的报告:"
             ls -la reports/
           fi
           if [ -d "logs" ]; then
-            echo ""
-            echo "📋 最新日志 (最后 30 行):"
+            echo "最新日志 (最后 30 行):"
             tail -30 logs/*.log 2>/dev/null || echo "无日志文件"
           fi
