@@ -1,12 +1,10 @@
-name: 每日股票分析（优化版）
+name: 每日股票分析
 
 on:
-  # 定时触发 - 工作日北京时间
   schedule:
     - cron: '30 0 * * 1-5'   # 北京08:30 工作日
     - cron: '30 7 * * 1-5'   # 北京15:30 工作日
   
-  # 手动触发
   workflow_dispatch:
     inputs:
       mode:
@@ -46,18 +44,25 @@ jobs:
       
       - name: 执行股票分析
         env:
+          # Gemini 配置（备用）
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-2.0-flash' }}
-          GEMINI_MODEL_FALLBACK: ${{ secrets.GEMINI_MODEL_FALLBACK || 'gemini-1.5-flash' }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3-pro' }}
+          GEMINI_MODEL_FALLBACK: ${{ vars.GEMINI_MODEL_FALLBACK || 'gemini-2.0-flash' }}
           GEMINI_REQUEST_DELAY: '6.0'
           GEMINI_MAX_RETRIES: '5'
           GEMINI_RETRY_DELAY: '10'
+          
+          # OpenAI 配置（优先）
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
-          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || 'gpt-4o-mini' }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || 'claude-4.5-sonnet' }}
+          
+          # 数据源
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
           TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
           SERPAPI_API_KEYS: ${{ secrets.SERPAPI_API_KEYS }}
+          
+          # 通知渠道
           WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -69,10 +74,16 @@ jobs:
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
           FEISHU_FOLDER_TOKEN: ${{ secrets.FEISHU_FOLDER_TOKEN }}
+          
+          # 股票列表
           STOCK_LIST: ${{ secrets.STOCK_LIST || '600519' }}
-          US_STOCK_LIST: ${{ secrets.US_STOCK_LIST || 'NVDA,TSLA,AMD,MSFT,GOOG,META,ISRG,SYM,TER,QCOM' }}
+          US_STOCK_LIST: ${{ vars.US_STOCK_LIST || 'NVDA,TSLA,AMD,MSFT,GOOG,META,ISRG,SYM,TER,QCOM' }}
+          
+          # 财报日历
           ENABLE_EARNINGS_CALENDAR: 'true'
           EARNINGS_LOOKAHEAD_DAYS: '7'
+          
+          # 其他
           LOG_LEVEL: INFO
           DATA_DAYS: '30'
           MAX_CONCURRENT: '1'
@@ -81,31 +92,44 @@ jobs:
           
           echo "=========================================="
           echo "股票分析系统启动"
-          echo "=========================================="
           echo "时间: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')"
-          echo "运行模式: $MODE"
-          echo "A股自选: $STOCK_LIST"
-          echo "美股监控: $US_STOCK_LIST"
+          echo "模式: $MODE"
+          echo "A股: $STOCK_LIST"
+          echo "美股: $US_STOCK_LIST"
           echo "=========================================="
           
-          sleep 30
+          sleep 15
           
           if [ "$MODE" = "market-only" ]; then
             python main.py --market-review
           elif [ "$MODE" = "stocks-only" ]; then
             python main.py --no-market-review
           elif [ "$MODE" = "earnings-only" ]; then
-            python -c "from earnings_calendar import EarningsCalendar; import os; cal = EarningsCalendar(); cn = os.getenv('STOCK_LIST', '').split(','); us = os.getenv('US_STOCK_LIST', '').split(','); events = cal.get_upcoming_earnings(cn, us); print(cal.format_notification(events)) if events else print('No earnings found')"
+            python -c "
+          try:
+              from earnings_calendar import EarningsCalendar
+              import os
+              cal = EarningsCalendar()
+              cn = os.getenv('STOCK_LIST', '').split(',')
+              us = os.getenv('US_STOCK_LIST', '').split(',')
+              events = cal.get_upcoming_earnings(cn, us)
+              if events:
+                  print(cal.format_notification(events))
+              else:
+                  print('No upcoming earnings')
+          except Exception as e:
+              print(f'Error: {e}')
+          "
           else
             python main.py
           fi
       
-      - name: 检查财报日历
-        if: env.ENABLE_EARNINGS_CALENDAR == 'true' && github.event.inputs.mode != 'earnings-only'
+      - name: 财报日历检查
+        if: always()
         continue-on-error: true
         env:
           STOCK_LIST: ${{ secrets.STOCK_LIST || '600519' }}
-          US_STOCK_LIST: ${{ secrets.US_STOCK_LIST || 'NVDA,TSLA,AMD,MSFT,GOOG,META,ISRG,SYM,TER,QCOM' }}
+          US_STOCK_LIST: ${{ vars.US_STOCK_LIST || 'NVDA,TSLA,AMD,MSFT,GOOG,META,ISRG,SYM,TER,QCOM' }}
           TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
         run: |
@@ -122,9 +146,11 @@ jobs:
                   print(cal.format_notification(events))
               else:
                   print('No upcoming earnings in the next 7 days')
+          except ImportError:
+              print('earnings_calendar.py not found - please upload to repo')
           except Exception as e:
-              print(f'Earnings calendar check failed: {e}')
-          "
+              print(f'Error: {e}')
+          " || echo "财报日历检查跳过"
       
       - name: 上传分析报告
         uses: actions/upload-artifact@v4
@@ -143,10 +169,6 @@ jobs:
           echo "分析完成"
           echo "=========================================="
           if [ -d "reports" ]; then
-            echo "生成的报告:"
+            echo "报告:"
             ls -la reports/
-          fi
-          if [ -d "logs" ]; then
-            echo "最新日志 (最后 30 行):"
-            tail -30 logs/*.log 2>/dev/null || echo "无日志文件"
           fi
