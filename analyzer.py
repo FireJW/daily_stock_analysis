@@ -386,7 +386,7 @@ class GeminiAnalyzer:
         """
         初始化 AI 分析器
         
-        优先级：Gemini > OpenAI 兼容 API
+        优先级（已调整）：OpenAI 优先 > Gemini 备用
         
         Args:
             api_key: Gemini API Key（可选，默认从配置读取）
@@ -394,25 +394,35 @@ class GeminiAnalyzer:
         config = get_config()
         self._api_key = api_key or config.gemini_api_key
         self._model = None
-        self._current_model_name = None  # 当前使用的模型名称
-        self._using_fallback = False  # 是否正在使用备选模型
-        self._use_openai = False  # 是否使用 OpenAI 兼容 API
-        self._openai_client = None  # OpenAI 客户端
+        self._current_model_name = None
+        self._using_fallback = False
+        self._use_openai = False
+        self._openai_client = None
         
-        # 检查 Gemini API Key 是否有效（过滤占位符）
-        gemini_key_valid = self._api_key and not self._api_key.startswith('your_') and len(self._api_key) > 10
+        # ⭐ 修改：OpenAI 优先！
+        # 先尝试初始化 OpenAI 兼容 API
+        self._init_openai_fallback()
         
-        # 优先尝试初始化 Gemini
-        if gemini_key_valid:
-            try:
-                self._init_model()
-            except Exception as e:
-                logger.warning(f"Gemini 初始化失败: {e}，尝试 OpenAI 兼容 API")
-                self._init_openai_fallback()
+        # 如果 OpenAI 初始化成功，Gemini 作为备用
+        if self._openai_client:
+            logger.info("OpenAI 兼容 API 已启用（优先）")
+            # 同时初始化 Gemini 作为备用
+            gemini_key_valid = self._api_key and not self._api_key.startswith('your_') and len(self._api_key) > 10
+            if gemini_key_valid:
+                try:
+                    self._init_model()
+                    logger.info("Gemini 已初始化（作为备用）")
+                except Exception as e:
+                    logger.debug(f"Gemini 备用初始化失败（不影响运行）: {e}")
         else:
-            # Gemini Key 未配置，尝试 OpenAI
-            logger.info("Gemini API Key 未配置，尝试使用 OpenAI 兼容 API")
-            self._init_openai_fallback()
+            # OpenAI 未配置，尝试 Gemini
+            logger.info("OpenAI 未配置，尝试使用 Gemini")
+            gemini_key_valid = self._api_key and not self._api_key.startswith('your_') and len(self._api_key) > 10
+            if gemini_key_valid:
+                try:
+                    self._init_model()
+                except Exception as e:
+                    logger.warning(f"Gemini 初始化失败: {e}")
         
         # 两者都未配置
         if not self._model and not self._openai_client:
@@ -602,12 +612,7 @@ class GeminiAnalyzer:
         """
         调用 AI API，带有重试和模型切换机制
         
-        优先级：Gemini > Gemini 备选模型 > OpenAI 兼容 API
-        
-        处理 429 限流错误：
-        1. 先指数退避重试
-        2. 多次失败后切换到备选模型
-        3. Gemini 完全失败后尝试 OpenAI
+        优先级（已调整）：OpenAI 优先 > Gemini > Gemini 备选模型
         
         Args:
             prompt: 提示词
@@ -616,9 +621,17 @@ class GeminiAnalyzer:
         Returns:
             响应文本
         """
-        # 如果已经在使用 OpenAI 模式，直接调用 OpenAI
-        if self._use_openai:
-            return self._call_openai_api(prompt, generation_config)
+        config = get_config()
+        last_error = None
+        
+        # ⭐ 修改：OpenAI 优先！
+        # 如果有 OpenAI 客户端，先尝试 OpenAI
+        if self._openai_client:
+            try:
+                return self._call_openai_api(prompt, generation_config)
+            except Exception as e:
+                last_error = e
+                logger.warning(f"[OpenAI] 调用失败，尝试 Gemini: {str(e)[:100]}")
         
         config = get_config()
         max_retries = config.gemini_max_retries
