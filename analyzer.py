@@ -398,6 +398,7 @@ class GeminiAnalyzer:
         self._using_fallback = False
         self._use_openai = False
         self._openai_client = None
+        self._openai_model_name = None  # ⭐ 新增：独立存储 OpenAI 模型名
         
         # ⭐ 修改：OpenAI 优先！
         # 先尝试初始化 OpenAI 兼容 API
@@ -465,6 +466,7 @@ class GeminiAnalyzer:
                 client_kwargs["base_url"] = config.openai_base_url
             
             self._openai_client = OpenAI(**client_kwargs)
+            self._openai_model_name = config.openai_model  # ⭐ 使用独立变量
             self._current_model_name = config.openai_model
             self._use_openai = True
             logger.info(f"OpenAI 兼容 API 初始化成功 (base_url: {config.openai_base_url}, model: {config.openai_model})")
@@ -558,7 +560,9 @@ class GeminiAnalyzer:
     
     def _call_openai_api(self, prompt: str, generation_config: dict) -> str:
         """
-        调用 OpenAI 兼容 API
+        调用 OpenAI 兼容 API（支持多模型降级）
+        
+        降级顺序：claude-4.5-sonnet-thinking → claude-4.5-sonnet → 用户配置的模型
         
         Args:
             prompt: 提示词
@@ -571,42 +575,76 @@ class GeminiAnalyzer:
         max_retries = config.gemini_max_retries
         base_delay = config.gemini_retry_delay
         
-        for attempt in range(max_retries):
-            try:
-                if attempt > 0:
-                    delay = base_delay * (2 ** (attempt - 1))
-                    delay = min(delay, 60)
-                    logger.info(f"[OpenAI] 第 {attempt + 1} 次重试，等待 {delay:.1f} 秒...")
-                    time.sleep(delay)
-                
-                response = self._openai_client.chat.completions.create(
-                    model=self._current_model_name,
-                    messages=[
-                        {"role": "system", "content": self.SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=generation_config.get('temperature', 0.7),
-                    max_tokens=generation_config.get('max_output_tokens', 8192),
-                )
-                
-                if response and response.choices and response.choices[0].message.content:
-                    return response.choices[0].message.content
-                else:
-                    raise ValueError("OpenAI API 返回空响应")
-                    
-            except Exception as e:
-                error_str = str(e)
-                is_rate_limit = '429' in error_str or 'rate' in error_str.lower() or 'quota' in error_str.lower()
-                
-                if is_rate_limit:
-                    logger.warning(f"[OpenAI] API 限流，第 {attempt + 1}/{max_retries} 次尝试: {error_str[:100]}")
-                else:
-                    logger.warning(f"[OpenAI] API 调用失败，第 {attempt + 1}/{max_retries} 次尝试: {error_str[:100]}")
-                
-                if attempt == max_retries - 1:
-                    raise
+        # ⭐ 多模型降级列表
+        models_to_try = []
         
-        raise Exception("OpenAI API 调用失败，已达最大重试次数")
+        # 优先尝试 thinking 版本
+        if self._openai_model_name:
+            # 如果用户配置的模型包含 thinking，直接用
+            if 'thinking' in self._openai_model_name.lower() or 'think' in self._openai_model_name.lower():
+                models_to_try.append(self._openai_model_name)
+                # 添加非 thinking 版本作为备用
+                fallback_model = self._openai_model_name.replace('-thinking', '').replace('-think', '')
+                if fallback_model != self._openai_model_name:
+                    models_to_try.append(fallback_model)
+            else:
+                # 用户配置的是普通版本，尝试先用 thinking 版本
+                thinking_model = self._openai_model_name + '-thinking'
+                models_to_try.append(thinking_model)
+                models_to_try.append(self._openai_model_name)
+        else:
+            # 默认模型列表
+            models_to_try = ['claude-4.5-sonnet-thinking', 'claude-4.5-sonnet', 'gpt-4o-mini']
+        
+        last_error = None
+        
+        for model in models_to_try:
+            logger.info(f"[OpenAI] 尝试模型: {model}")
+            
+            for attempt in range(max_retries):
+                try:
+                    if attempt > 0:
+                        delay = base_delay * (2 ** (attempt - 1))
+                        delay = min(delay, 60)
+                        logger.info(f"[OpenAI] 第 {attempt + 1} 次重试，等待 {delay:.1f} 秒...")
+                        time.sleep(delay)
+                    
+                    response = self._openai_client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": self.SYSTEM_PROMPT},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=generation_config.get('temperature', 0.7),
+                        max_tokens=generation_config.get('max_output_tokens', 8192),
+                    )
+                    
+                    if response and response.choices and response.choices[0].message.content:
+                        logger.info(f"[OpenAI] ✅ 模型 {model} 调用成功")
+                        return response.choices[0].message.content
+                    else:
+                        raise ValueError("OpenAI API 返回空响应")
+                        
+                except Exception as e:
+                    last_error = e
+                    error_str = str(e)
+                    is_rate_limit = '429' in error_str or 'rate' in error_str.lower() or 'quota' in error_str.lower()
+                    is_model_not_found = '503' in error_str or '无可用渠道' in error_str or 'not found' in error_str.lower()
+                    
+                    if is_model_not_found:
+                        logger.warning(f"[OpenAI] 模型 {model} 不可用，尝试下一个模型: {error_str[:80]}")
+                        break  # 跳出重试循环，尝试下一个模型
+                    elif is_rate_limit:
+                        logger.warning(f"[OpenAI] API 限流，第 {attempt + 1}/{max_retries} 次尝试: {error_str[:80]}")
+                    else:
+                        logger.warning(f"[OpenAI] API 调用失败，第 {attempt + 1}/{max_retries} 次尝试: {error_str[:80]}")
+                    
+                    if attempt == max_retries - 1:
+                        logger.warning(f"[OpenAI] 模型 {model} 重试耗尽，尝试下一个模型")
+                        break
+        
+        raise last_error or Exception("所有 OpenAI 模型均调用失败")
+
     
     def _call_api_with_retry(self, prompt: str, generation_config: dict) -> str:
         """
