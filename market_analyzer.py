@@ -310,23 +310,47 @@ class MarketAnalyzer:
         
         return all_news
     
-    def generate_market_review(self, overview: MarketOverview, news: List) -> str:
+    def run_daily_review(self) -> str:
+        """
+        执行每日大盘复盘流程
+        
+        Returns:
+            复盘报告文本
+        """
+        logger.info("========== 开始大盘复盘分析 ==========")
+        
+        # 1. 获取市场概览
+        overview = self.get_market_overview()
+        
+        # 2. 搜索市场新闻
+        news = self.search_market_news()
+        
+        # 3. 扫描全球市场异动 (新增)
+        global_anomalies = []
+        try:
+            from global_market_scanner import GlobalMarketScanner
+            scanner = GlobalMarketScanner(search_service=self.search_service)
+            global_anomalies = scanner.scan_and_analyze()
+        except Exception as e:
+            logger.error(f"[大盘] 全球市场扫描失败: {e}")
+        
+        # 4. 生成复盘报告
+        report = self.generate_market_review(overview, news, global_anomalies)
+        
+        logger.info("========== 大盘复盘分析完成 ==========")
+        
+        return report
+
+    def generate_market_review(self, overview: MarketOverview, news: List, global_anomalies: List = None) -> str:
         """
         使用大模型生成大盘复盘报告
-        
-        Args:
-            overview: 市场概览数据
-            news: 市场新闻列表 (SearchResult 对象列表)
-            
-        Returns:
-            大盘复盘报告文本
         """
         if not self.analyzer or not self.analyzer.is_available():
             logger.warning("[大盘] AI分析器未配置或不可用，使用模板生成报告")
-            return self._generate_template_review(overview, news)
+            return self._generate_template_review(overview, news, global_anomalies)
         
         # 构建 Prompt
-        prompt = self._build_review_prompt(overview, news)
+        prompt = self._build_review_prompt(overview, news, global_anomalies)
         
         try:
             logger.info("[大盘] 调用大模型生成复盘报告...")
@@ -353,15 +377,15 @@ class MarketAnalyzer:
                 return review
             else:
                 logger.warning("[大盘] 大模型返回为空")
-                return self._generate_template_review(overview, news)
+                return self._generate_template_review(overview, news, global_anomalies)
                 
         except Exception as e:
             logger.error(f"[大盘] 大模型生成复盘报告失败: {e}")
-            return self._generate_template_review(overview, news)
-    
-    def _build_review_prompt(self, overview: MarketOverview, news: List) -> str:
+            return self._generate_template_review(overview, news, global_anomalies)
+
+    def _build_review_prompt(self, overview: MarketOverview, news: List, global_anomalies: List = None) -> str:
         """构建复盘报告 Prompt"""
-        # 指数行情信息（简洁格式，不用emoji）
+        # 指数行情信息
         indices_text = ""
         for idx in overview.indices:
             direction = "↑" if idx.change_pct > 0 else "↓" if idx.change_pct < 0 else "-"
@@ -371,10 +395,9 @@ class MarketAnalyzer:
         top_sectors_text = ", ".join([f"{s['name']}({s['change_pct']:+.2f}%)" for s in overview.top_sectors[:3]])
         bottom_sectors_text = ", ".join([f"{s['name']}({s['change_pct']:+.2f}%)" for s in overview.bottom_sectors[:3]])
         
-        # 新闻信息 - 支持 SearchResult 对象或字典
+        # 新闻信息
         news_text = ""
         for i, n in enumerate(news[:6], 1):
-            # 兼容 SearchResult 对象和字典
             if hasattr(n, 'title'):
                 title = n.title[:50] if n.title else ''
                 snippet = n.snippet[:100] if n.snippet else ''
@@ -382,6 +405,17 @@ class MarketAnalyzer:
                 title = n.get('title', '')[:50]
                 snippet = n.get('snippet', '')[:100]
             news_text += f"{i}. {title}\n   {snippet}\n"
+            
+        # 全球异动信息
+        global_text = "暂无明显异动"
+        if global_anomalies:
+            global_text = ""
+            for i, item in enumerate(global_anomalies, 1):
+                reason = item.reason[:200] if item.reason else "原因未明"
+                related = "; ".join(item.related_stocks) if item.related_stocks else "无推荐"
+                global_text += f"{i}. {item.name}: {item.change_pct:+.2f}%\n"
+                global_text += f"   异动原因: {reason}\n"
+                global_text += f"   A股映射: {related}\n"
         
         prompt = f"""你是一位专业的A股市场分析师，请根据以下数据生成一份简洁的大盘复盘报告。
 
@@ -411,6 +445,9 @@ class MarketAnalyzer:
 领涨: {top_sectors_text}
 领跌: {bottom_sectors_text}
 
+## 全球市场异动（过去24h）
+{global_text}
+
 ## 市场新闻
 {news_text if news_text else "暂无相关新闻"}
 
@@ -432,10 +469,13 @@ class MarketAnalyzer:
 ### 四、热点解读
 （分析领涨领跌板块背后的逻辑和驱动因素）
 
-### 五、后市展望
+### 五、全球联动（新增）
+（重点点评上述提到的全球市场异动及其对A股的潜在影响，特别是提到的映射股票。如果无异动则略过此节）
+
+### 六、后市展望
 （结合当前走势和新闻，给出明日市场预判）
 
-### 六、风险提示
+### 七、风险提示
 （需要关注的风险点）
 
 ---
@@ -444,7 +484,7 @@ class MarketAnalyzer:
 """
         return prompt
     
-    def _generate_template_review(self, overview: MarketOverview, news: List) -> str:
+    def _generate_template_review(self, overview: MarketOverview, news: List, global_anomalies: List = None) -> str:
         """使用模板生成复盘报告（无大模型时的备选方案）"""
         
         # 判断市场走势
@@ -461,7 +501,7 @@ class MarketAnalyzer:
         else:
             market_mood = "震荡整理"
         
-        # 指数行情（简洁格式）
+        # 指数行情
         indices_text = ""
         for idx in overview.indices[:4]:
             direction = "↑" if idx.change_pct > 0 else "↓" if idx.change_pct < 0 else "-"
@@ -470,6 +510,18 @@ class MarketAnalyzer:
         # 板块信息
         top_text = "、".join([s['name'] for s in overview.top_sectors[:3]])
         bottom_text = "、".join([s['name'] for s in overview.bottom_sectors[:3]])
+        
+        # 全球异动
+        global_section = ""
+        if global_anomalies:
+            global_section = "### 五、全球联动\n"
+            for item in global_anomalies:
+                global_section += f"- **{item.name}**: {item.change_pct:+.2f}%\n"
+                if item.reason:
+                    global_section += f"  > 原因: {item.reason}\n"
+                if item.related_stocks:
+                    global_section += f"  > 关注: {', '.join(item.related_stocks)}\n"
+            global_section += "\n"
         
         report = f"""## 📊 {overview.date} 大盘复盘
 
@@ -493,34 +545,13 @@ class MarketAnalyzer:
 - **领涨**: {top_text}
 - **领跌**: {bottom_text}
 
-### 五、风险提示
+{global_section}
+### {"六" if global_anomalies else "五"}、风险提示
 市场有风险，投资需谨慎。以上数据仅供参考，不构成投资建议。
 
 ---
 *复盘时间: {datetime.now().strftime('%H:%M')}*
 """
-        return report
-    
-    def run_daily_review(self) -> str:
-        """
-        执行每日大盘复盘流程
-        
-        Returns:
-            复盘报告文本
-        """
-        logger.info("========== 开始大盘复盘分析 ==========")
-        
-        # 1. 获取市场概览
-        overview = self.get_market_overview()
-        
-        # 2. 搜索市场新闻
-        news = self.search_market_news()
-        
-        # 3. 生成复盘报告
-        report = self.generate_market_review(overview, news)
-        
-        logger.info("========== 大盘复盘分析完成 ==========")
-        
         return report
 
 

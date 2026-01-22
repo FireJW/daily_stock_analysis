@@ -182,36 +182,16 @@ class LLMClient:
         """
         生成响应，自动降级
         
-        降级顺序：
-        1. Gemini 主模型
-        2. Gemini 备用模型
-        3. OpenAI Provider 1
-        4. OpenAI Provider 2
-        5. ...
+        降级顺序（OpenAI 优先）：
+        1. OpenAI Provider 1
+        2. OpenAI Provider 2
+        3. ...
+        4. Gemini 主模型
+        5. Gemini 备用模型
         """
         errors = []
         
-        # 1. 尝试 Gemini 主模型
-        if self.gemini_client:
-            response = self._try_gemini(
-                prompt, system_prompt, self.gemini_model, 
-                temperature, max_tokens
-            )
-            if response.text:
-                return response
-            errors.append(f"Gemini({self.gemini_model}): {response.error}")
-            
-            # 2. 尝试 Gemini 备用模型
-            if self.gemini_fallback and self.gemini_fallback != self.gemini_model:
-                response = self._try_gemini(
-                    prompt, system_prompt, self.gemini_fallback,
-                    temperature, max_tokens
-                )
-                if response.text:
-                    return response
-                errors.append(f"Gemini({self.gemini_fallback}): {response.error}")
-        
-        # 3. 按顺序尝试 OpenAI 兼容服务
+        # 1. 优先尝试 OpenAI 兼容服务（按配置顺序）
         for provider in self.openai_providers:
             response = self._try_openai_provider(
                 provider, prompt, system_prompt,
@@ -221,6 +201,26 @@ class LLMClient:
                 logger.info(f"✅ 使用 {provider.name} ({provider.model}) 成功")
                 return response
             errors.append(f"{provider.name}({provider.model}): {response.error}")
+        
+        # 2. 降级到 Gemini 主模型
+        if self.gemini_client:
+            response = self._try_gemini(
+                prompt, system_prompt, self.gemini_model, 
+                temperature, max_tokens
+            )
+            if response.text:
+                return response
+            errors.append(f"Gemini({self.gemini_model}): {response.error}")
+            
+            # 3. 尝试 Gemini 备用模型
+            if self.gemini_fallback and self.gemini_fallback != self.gemini_model:
+                response = self._try_gemini(
+                    prompt, system_prompt, self.gemini_fallback,
+                    temperature, max_tokens
+                )
+                if response.text:
+                    return response
+                errors.append(f"Gemini({self.gemini_fallback}): {response.error}")
         
         # 全部失败
         error_msg = " | ".join(errors) if errors else "无可用 LLM"
@@ -342,37 +342,3 @@ class LLMClient:
 def get_llm_client() -> LLMClient:
     """获取 LLM 客户端实例"""
     return LLMClient()
-
-
-# 测试代码
-if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    # 测试配置（模拟多个提供商）
-    os.environ.setdefault('OPENAI_API_KEY', 'sk-test1,sk-test2')
-    os.environ.setdefault('OPENAI_BASE_URL', 'https://api.deepseek.com/v1,https://api.openai.com/v1')
-    os.environ.setdefault('OPENAI_MODEL', 'deepseek-chat,gpt-4o-mini')
-    
-    client = LLMClient()
-    
-    print("\n=== 已配置的提供商 ===")
-    for i, p in enumerate(client.openai_providers):
-        print(f"  {i+1}. {p.name}: {p.model}")
-    
-    if client.is_available():
-        print("\n=== 发送测试请求 ===")
-        response = client.generate(
-            prompt="请用一句话介绍贵州茅台",
-            system_prompt="你是一位股票分析师"
-        )
-        
-        print(f"\n提供商: {response.provider}")
-        print(f"模型: {response.model}")
-        print(f"响应: {response.text[:200] if response.text else '(无响应)'}")
-        if response.error:
-            print(f"错误: {response.error}")
-    else:
-        print("\n未配置任何 LLM API Key")
