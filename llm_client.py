@@ -10,7 +10,7 @@ A股自选股智能分析系统 - 统一 LLM 客户端（多服务商版）
 3. 支持用户配置多个 API 服务商（负载均衡/降级）
 
 配置方式（支持逗号分隔多个）：
-    OPENAI_API_KEY=sk-deepseek-xxx,sk-openai-xxx
+    OPENAI_API_KEY=<deepseek-api-key>,<openai-api-key>
     OPENAI_BASE_URL=https://api.deepseek.com/v1,https://api.openai.com/v1
     OPENAI_MODEL=deepseek-chat,gpt-4o-mini
 
@@ -89,7 +89,7 @@ class LLMClient:
         解析多个 OpenAI 兼容服务配置
         
         支持格式：
-        OPENAI_API_KEY=key1,key2,key3
+        OPENAI_API_KEY=<provider-key-1>,<provider-key-2>,<provider-key-3>
         OPENAI_BASE_URL=url1,url2,url3
         OPENAI_MODEL=model1,model2,model3
         """
