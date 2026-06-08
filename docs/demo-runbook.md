@@ -24,4 +24,4 @@ Use this runbook for public demos without exposing personal credentials, private
 - No real API keys, webhook URLs, chat IDs, app secrets, cookies, or private endpoints appear in logs.
 - Screenshots use sample symbols and do not show account or client information.
 - Generated analysis is labeled as workflow output, not investment advice.
-- Any upstream attribution remains visible.
+- Upstream attribution remains visible.

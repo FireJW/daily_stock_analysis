@@ -83,8 +83,7 @@ def review_with_gemini(prompt):
         print("❌ Gemini API Key 未配置（检查 GitHub Secrets: GEMINI_API_KEY）")
         return None
     
-    # 打印部分 key 用于调试（只显示前8位）
-    print(f"🔑 Gemini API Key: {api_key[:8]}... (长度: {len(api_key)})")
+    print("Gemini API key configured")
     print(f"🤖 使用模型: {model}")
     
     try:
@@ -118,7 +117,7 @@ def review_with_openai(prompt):
         print("❌ OpenAI API Key 未配置（检查 GitHub Secrets: OPENAI_API_KEY）")
         return None
     
-    print(f"🔑 OpenAI API Key: {api_key[:8]}... (长度: {len(api_key)})")
+    print("OpenAI API key configured")
     print(f"🌐 Base URL: {base_url}")
     print(f"🤖 使用模型: {model}")
     

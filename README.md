@@ -1,136 +1,89 @@
 # Daily Stock Analysis
 
-Portfolio fork of an AI-assisted A-share analysis workflow that combines market data, news search, LLM reasoning, and scheduled notification delivery.
+Daily Stock Analysis is a Python workflow for running scheduled A-share market reviews, watchlist analysis, news enrichment, and multi-channel notification summaries.
 
-This repository is maintained as a public portfolio packaging of the upstream project by `ZhuLinsen/daily_stock_analysis`. The README, documentation, and GitHub profile text here focus on the system design, automation boundaries, and safe evaluation workflow rather than claiming original authorship of the upstream code.
+This repository is packaged as a public portfolio version. It keeps the automation structure visible, but credentials, local databases, logs, generated reports, and private runtime artifacts are intentionally excluded.
 
-## What It Demonstrates
+## What It Does
 
-- Multi-source market data ingestion through AkShare, Tushare, Baostock, and YFinance adapters.
-- LLM-backed analysis with Gemini or OpenAI-compatible providers.
-- News and event enrichment through Tavily and SerpAPI.
-- Scheduled GitHub Actions execution for daily market review, stock watchlist analysis, and earnings checks.
-- Multi-channel delivery through WeCom, Feishu, Telegram, email, and custom webhooks.
-- Practical operational controls: rate limits, retries, local SQLite storage, logs, and report artifacts.
+- Builds a daily stock-watchlist review from configurable tickers.
+- Pulls market data from public and optional provider APIs.
+- Adds AI-assisted analysis through user-provided model credentials.
+- Sends summaries through optional channels such as WeChat Work, Feishu, Telegram, email, or custom webhooks.
+- Supports local runs, Docker runs, and GitHub Actions scheduling.
 
-## Portfolio Context
-
-This fork is useful as a reviewable example of:
-
-- how a market-analysis automation is structured end to end;
-- how environment-driven secrets and notification channels are wired into GitHub Actions;
-- how AI output can be converted into checklists and decision dashboards;
-- how to document financial automation with explicit risk and privacy boundaries.
-
-The project is not investment advice, trading infrastructure, or a managed financial product.
-
-## System Flow
+## Repository Layout
 
 ```text
-Watchlist / schedule
-        |
-        v
-Market data providers + news search
-        |
-        v
-Feature preparation and market context
-        |
-        v
-LLM analysis prompt and fallback model routing
-        |
-        v
-Decision dashboard, market review, earnings digest
-        |
-        v
-Reports, logs, notification channels
+main.py                  CLI entrypoint for daily analysis runs
+config.py                Environment-driven configuration loader
+analyzer.py              Analysis orchestration and AI prompt flow
+llm_client.py            Gemini and OpenAI-compatible provider adapter
+notification.py          Notification rendering and delivery helpers
+storage.py               SQLite persistence helpers
+data_provider/           Market data provider adapters
+sources/                 Public demo assets
+.github/workflows/       CI and scheduled workflow templates
 ```
 
 ## Quick Start
 
-Clone and install dependencies:
-
-```bash
-git clone https://github.com/FireJW/daily_stock_analysis.git
-cd daily_stock_analysis
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+Copy-Item .env.example .env
+python test_env.py
+python main.py --help
 ```
 
-Create local configuration:
+Fill `.env` with your own API keys and notification endpoints before running a live analysis. The repository does not include working credentials.
 
-```bash
-cp .env.example .env
-```
+## Configuration
 
-At minimum, configure:
+Common environment variables:
 
-```bash
-STOCK_LIST=600519,300750,002594
-GEMINI_API_KEY=your_gemini_key
-```
+| Variable | Purpose | Required |
+| --- | --- | --- |
+| `STOCK_LIST` | Comma-separated watchlist, such as `600519,300750,002594` | Yes |
+| `GEMINI_API_KEY` | Google AI Studio key for AI analysis | One AI key required |
+| `OPENAI_API_KEY` | OpenAI-compatible fallback key | Optional |
+| `OPENAI_BASE_URL` | OpenAI-compatible endpoint | Optional |
+| `TUSHARE_TOKEN` | Optional Tushare Pro token | Optional |
+| `TAVILY_API_KEYS` | Optional news search keys | Optional |
+| `WECHAT_WEBHOOK_URL` | Optional WeChat Work webhook | Optional |
+| `FEISHU_WEBHOOK_URL` | Optional Feishu webhook | Optional |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Optional Telegram channel | Optional |
+| `EMAIL_SENDER` / `EMAIL_PASSWORD` / `EMAIL_RECEIVERS` | Optional email delivery | Optional |
 
-Run locally:
+Do not commit `.env`, databases, logs, or generated reports.
 
-```bash
-python main.py
-python main.py --market-review
-python main.py --schedule
-```
+## GitHub Actions
 
-For GitHub Actions execution, configure repository secrets for model keys, stock lists, and notification channels, then run the `每日股票分析` workflow manually or on schedule.
+The workflow templates under `.github/workflows/` are intended as examples. To use them in your own fork:
 
-## Configuration Surface
+1. Add the required secrets in GitHub Actions settings.
+2. Review the scheduled run time and stock list.
+3. Run the workflow manually once before enabling a schedule.
 
-Core inputs are environment variables:
+No repository secret is included in this public package.
 
-| Area | Variables |
-| --- | --- |
-| Watchlist | `STOCK_LIST`, `US_STOCK_LIST` |
-| Model access | `GEMINI_API_KEY`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL` |
-| Search | `TAVILY_API_KEYS`, `SERPAPI_API_KEYS` |
-| Market data | `TUSHARE_TOKEN` |
-| Notifications | `WECHAT_WEBHOOK_URL`, `FEISHU_WEBHOOK_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `EMAIL_SENDER`, `EMAIL_PASSWORD`, `CUSTOM_WEBHOOK_URLS` |
-| Runtime | `DATABASE_PATH`, `LOG_DIR`, `LOG_LEVEL`, `MAX_WORKERS`, `SCHEDULE_ENABLED`, `SCHEDULE_TIME` |
+## Public Safety
 
-See `.env.example` for the full template.
+This public version excludes:
 
-## Repository Map
+- `.env` and local credential files
+- SQLite databases and generated reports
+- runtime logs
+- private notification endpoints
+- local machine paths
 
-```text
-daily_stock_analysis/
-├── main.py                 # CLI and workflow entry point
-├── analyzer.py             # LLM-assisted stock analysis
-├── market_analyzer.py      # Market review pipeline
-├── search_service.py       # News and web search enrichment
-├── notification.py         # Notification adapters
-├── scheduler.py            # Local scheduled execution
-├── storage.py              # SQLite-backed storage
-├── config.py               # Environment-driven configuration
-├── data_provider/          # Market data provider adapters
-├── .github/workflows/      # GitHub Actions automation
-├── docs/                   # Portfolio and safety documentation
-└── sources/                # Demo screenshots and media from the upstream project
-```
+The diagnostic script reports whether credentials are configured, but it does not print token prefixes or secret values.
 
-## Documentation
+## Status
 
-- [Portfolio overview](https://firejw.github.io/daily_stock_analysis/)
-- [Source methodology](docs/source-methodology.md)
-- [Security and privacy](docs/security-and-privacy.md)
-- [Deployment notes](DEPLOY.md)
-
-## Safety Notes
-
-- This repository is for learning, portfolio review, and workflow evaluation.
-- Outputs can be incomplete, stale, or wrong because they depend on external data providers, search APIs, and LLM responses.
-- Do not put real API keys, cookies, tokens, account identifiers, or private watchlists in commits, issues, screenshots, or public logs.
-- Treat any generated buy, sell, stop-loss, or target-price language as an analysis artifact, not as financial advice.
-
-## Upstream Attribution
-
-Original upstream project and codebase: `ZhuLinsen/daily_stock_analysis`.
-
-This FireJW repository keeps that attribution visible and packages the fork for public review with clearer portfolio positioning, safety notes, and GitHub Pages documentation.
+This is a legacy automation project packaged for public review. For a cleaner current stock-research workflow kit, see [Stock Analysis Plus](https://github.com/FireJW/stock-analysis-plus).
 
 ## License
 
-MIT License. See [LICENSE](LICENSE).
+MIT License.
